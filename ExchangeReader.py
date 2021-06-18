@@ -5,9 +5,12 @@ import hashlib
 import hmac
 from time import time
 
+# btdex URL assumes local btdex instance, will use different URL for production
+# using BTC pair on btdex because it has highest volume
+
 api_urls = {'stex': "https://api3.stex.com/public/ticker/1040",
             'bittrex': "https://api.bittrex.com/v3",
-            'btdex': "https://wallet.burstcoin.ro"}
+            'btdex': "http://localhost:9000/api/v1/orderbook/BTC_BURST"}
 
 exchangeResponses = {}
 stexResponse = {}
@@ -25,7 +28,20 @@ try:
 except json.JSONDecodeError:  # test to make sure this catches the correct exception
     print("Response body does not contain valid JSON.")
 
-# get Bittrex next
+# get btdex next
+
+try:
+    response = requests.get(api_urls['btdex'])
+except ConnectionError:
+    print("Connection error to Stex")
+try:
+    exchangeResponses['stex'] = response.json()
+except json.JSONDecodeError:
+    print("Response body does not contain valid JSON.")
+
+# get... wherever was just added
+
+# get Bittrex last
 # request info from Bittrex, conforming to their API standards
 
 bittrex_uri = "https://api.bittrex.com/v3"
@@ -52,13 +68,9 @@ try:
 except ConnectionError:  # test to make sure no other exceptions are thrown
     print("Connection error to Bittrex")
 try:
-    exchangeResponses['bittrex'] = response.json()  # this will create a dictionary of dictionaries
-except json.JSONDecodeError:  # test to make sure this catches the correct exception
+    exchangeResponses['bittrex'] = response.json()
+except json.JSONDecodeError:
     print("Response body does not contain valid JSON.")
-
-# parse the results from btdex
-
-# parse the results from... whenever just got added
 
 # parse the results from Stex
 interestingKeys = {'ask', 'bid', 'last', 'low', 'high'}
@@ -74,3 +86,9 @@ for currency in currencies:
     stexRates[currency] = rate
 
 stexResponse["fiatsRate"] = stexRates
+
+# parse the results from bittrex
+
+# parse the results from btdex
+# the only information we can get from btdex is bids and asks for each pair
+# we need to use a BTC exchange rate to convert those to fiat
