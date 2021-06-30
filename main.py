@@ -1,6 +1,6 @@
 import json
 import requests
-import matplotlib.pyplot
+import matplotlib.pyplot as pp
 
 node_url = "https://wallet.burstcoin.ro/burst?requestType="
 mining_info_url = node_url + "getMiningInfo"
@@ -10,8 +10,10 @@ exchange_info_url = "https://myexchangeinfobucketthing.com"  # TODO replace this
 TERABYTE = 10 ** 12
 TEBIBYTE = 2 ** 40
 SPACE_CONVERSION = TERABYTE / TEBIBYTE
+TERABYTE_TO_GIGABYTE = 1000
 DOLLAR_TO_CENT_HUNDREDTHS = 10000
 CENT_TO_CENT_HUNDREDTHS = 100
+BLOCK_REWARD = 148
 
 
 def get_api(url):
@@ -19,51 +21,71 @@ def get_api(url):
         response = requests.get(url)
         try:
             dict_response = response.json()
-            return dict_response
         except json.JSONDecodeError:  # TODO ensure this doesn't need to be simplejson.JSONDecodeError
             print("Response body does not contain valid JSON.")
+        else:
+            return dict_response
     except ConnectionError:
         print("Connection error.")
 
 
 def get_prices():  # TODO query the AWS bucket for price data, throw exception on failure
-    return int(0.02 * CENT_TO_CENT_HUNDREDTHS)
+    return int(0.015 * DOLLAR_TO_CENT_HUNDREDTHS)
 
 
-def plot_with_commit(target_commitment, plot_size):
-    commitment_ratio = target_commitment / average_commitment  # TODO try/catch for div by zero
+def plot_with_commit(total_commitment, plot_size_tb):
+    commitment_per_tebibyte = total_commitment / (plot_size_tb * SPACE_CONVERSION)
+    commitment_ratio = commitment_per_tebibyte / average_commitment  # TODO try/catch for div by zero
     commitment_factor = commitment_ratio ** 0.4515449935  # this is an approximation
-    return plot_size * commitment_factor  # returns effective plot space for a given commitment
+    return plot_size_tb * commitment_factor  # returns effective plot space in terabytes for given commitment
 
 
-def chance_to_win(effective_space, net_space):
-    return effective_space / net_space  # TODO try/catch for div by zero
+def chance_to_win(effective_space_bytes, net_space):
+    return effective_space_bytes / net_space  # TODO try/catch for div by zero
 
 
-budget_cents = int(float(input("Enter your maximum budget, in USD: ")) * DOLLAR_TO_CENT_HUNDREDTHS)
-cost_per_tb = int(float(input("Enter your hard drive price per TB, in USD: ")) * DOLLAR_TO_CENT_HUNDREDTHS)
-if cost_per_tb == 0:
+budget_cent_hundredths = int(float(input("Enter your maximum budget, in USD: ")) * DOLLAR_TO_CENT_HUNDREDTHS)
+
+cost_per_drive = int(float(input("Enter your hard drive price, in USD: ")) * DOLLAR_TO_CENT_HUNDREDTHS)
+if cost_per_drive == 0:
     print('Cost of hard drive space was entered as 0- just buy Signa then!')
     raise SystemExit
-unit_drive = int(float(input("Enter your hard drive size in TB: ")) * 1000)
-max_tb = budget_cents // cost_per_tb
+unit_drive_tb = float(input("Enter your hard drive size in TB: "))
+unit_drive_gb = int(unit_drive_tb * TERABYTE_TO_GIGABYTE)
+cost_per_gb = cost_per_drive // unit_drive_gb
+max_gb = int(budget_cent_hundredths / cost_per_gb)
+
 print('Checking exchange data cache server for price data.')
 cost_per_signa = get_prices()
-signa_per_tb = cost_per_tb // cost_per_signa  # TODO need to ensure this is precise enough (enough sig figs)
-signa_budget = budget_cents // (cost_per_signa * CENT_TO_CENT_HUNDREDTHS)
 print('Checking node for chain data.')
 mining_info = get_api(mining_info_url)
 chain_status = get_api(chain_status_url)
-net_space_bytes = chain_status["cumulativeDifficulty"]
+print('Got chain data.')
+# net_space_bytes = int(chain_status["cumulativeDifficulty"])
+net_space_bytes = 26259690000000000  # TODO find out where to get network size
 average_commitment = round(float(mining_info["averageCommitmentNQT"]) / 1e8)  # average in whole burst
 
 # start building the table
-min_step = 1 if unit_drive >= 1 else unit_drive
-max_step = max_tb if max_tb % min_step == 0 else max_tb - (max_tb % min_step)  # TODO add unit_drive to get last step?
-tb_steps = [tb for tb in range(min_step, max_step, unit_drive)]
-# TODO signa_steps can use list(reversed(range(whatever)))
-signa_steps = [signa for signa in range(signa_budget, -1 * unit_drive, -1 * unit_drive * signa_per_tb)]
-for tb in tb_steps:
-    print(tb)
-for signa in signa_steps:
-    print(signa)
+if max_gb % unit_drive_gb == 0:
+    range_max = max_gb + unit_drive_gb
+else:
+    range_max = max_gb + unit_drive_gb - (max_gb % unit_drive_gb)
+
+tb_steps = [gb / 1000 for gb in range(unit_drive_gb, range_max, unit_drive_gb)]
+
+signa_steps = []
+for step in range(len(tb_steps)):
+    remaining_budget = budget_cent_hundredths - (cost_per_drive * step)
+    signa_steps.append(remaining_budget / cost_per_signa)
+
+# calculate the payout of each step
+earnings = []
+for step in range(len(tb_steps)):
+    effective_plot_in_bytes = int(plot_with_commit(tb_steps[step], signa_steps[step]) * TERABYTE)
+    chance: float = chance_to_win(effective_plot_in_bytes, net_space_bytes + effective_plot_in_bytes)
+    payout = chance * BLOCK_REWARD
+    daily_payout = payout * 360  # assume 4 minute blocks
+    earnings.append(daily_payout)
+
+pp.plot(tb_steps, earnings)
+pp.show()
